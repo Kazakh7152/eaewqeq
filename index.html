@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Взлом вышки — мини-игра</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#0f1724;--accent:#7dd3fc;--glass: rgba(255,255,255,0.04)}
+    *{box-sizing:border-box;font-family:Inter, Arial, sans-serif}
+    body{margin:0;min-height:100vh;background:linear-gradient(180deg,#041027 0%, #071426 100%);color:#e6eef8;display:flex;align-items:center;justify-content:center;padding:24px}
+    .wrap{width:980px;max-width:100%;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border-radius:12px;padding:20px;box-shadow:0 8px 30px rgba(0,0,0,0.6)}
+    header{display:flex;align-items:center;gap:16px}
+    .logo{width:64px;height:64px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#60a5fa);display:flex;align-items:center;justify-content:center;font-weight:700;color:#072233}
+    h1{font-size:20px;margin:0}
+    .sub{color:#93c5fd;opacity:0.9;font-size:13px}
+
+    .progress-area{margin-top:18px;background:var(--panel);padding:16px;border-radius:8px;display:flex;gap:16px;align-items:center}
+    .meter{flex:1}
+    .bar{height:28px;background:var(--glass);border-radius:999px;position:relative;overflow:hidden}
+    .bar-fill{height:100%;width:0%;background:linear-gradient(90deg,#34d399,#60a5fa);border-radius:999px;transition:width 300ms linear}
+    .bar-label{display:flex;justify-content:space-between;margin-top:8px;font-size:13px;color:#cfefff}
+    .numbers{min-width:120px;text-align:right}
+
+    .controls{display:flex;gap:8px;align-items:center}
+    button{background:#112233;border:1px solid rgba(255,255,255,0.04);color:var(--accent);padding:8px 12px;border-radius:8px;cursor:pointer}
+
+    /* mini-game panel */
+    .minigame{margin-top:16px;padding:12px;border-radius:10px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);display:none}
+    .minigame.active{display:block}
+    .mg-top{display:flex;justify-content:space-between;align-items:center}
+    .countdown{font-weight:700}
+    .mg-area{display:flex;gap:20px;margin-top:12px;align-items:flex-start}
+    .column{display:flex;flex-direction:column;gap:10px}
+    .slot{width:120px;height:44px;border-radius:8px;background:rgba(255,255,255,0.02);display:flex;align-items:center;justify-content:center;border:2px dashed rgba(255,255,255,0.03)}
+    .draggable{width:120px;height:44px;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:grab;border:2px solid rgba(255,255,255,0.04);user-select:none}
+    .draggable.dragging{opacity:0.6}
+    .hint{margin-top:10px;color:#bfe8ff;font-size:13px}
+
+    /* SVG overlay for wires */
+    .svg-wrap{position:relative;width:100%;height:220px}
+    svg{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+
+    .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .msg{pointer-events:auto;background:#042034;padding:18px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);min-width:360px;text-align:center}
+    .msg h2{margin:0 0 8px}
+
+    /* responsive smaller */
+    @media (max-width:720px){
+      .wrap{padding:12px}
+      .slot,.draggable{width:100px}
+      .svg-wrap{height:260px}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">WT</div>
+      <div>
+        <h1>Взлом вышки</h1>
+        <div class="sub">Сломанная система защиты — доведи загрузку до 100%</div>
+      </div>
+      <div style="margin-left:auto;opacity:0.9;font-size:13px">Интерактивный макет — HTML/CSS/JS</div>
+    </header>
+
+    <div class="progress-area">
+      <div class="meter">
+        <div class="bar" aria-hidden>
+          <div id="barFill" class="bar-fill"></div>
+        </div>
+        <div class="bar-label">
+          <div id="statusText">Состояние: Инициализация...</div>
+          <div class="numbers"><span id="percent">0%</span></div>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="forceFail">Вызвать сбой</button>
+        <button id="reset">Сброс</button>
+      </div>
+    </div>
+
+    <div id="minigame" class="minigame">
+      <div class="mg-top">
+        <div>Сбой! Соедините провода по цветам за <span class="countdown" id="mgTimer">10</span> сек</div>
+        <div>Успешных подключений: <span id="matchedCount">0</span>/6</div>
+      </div>
+
+      <div class="svg-wrap" id="svgWrap">
+        <svg id="wires"></svg>
+        <div class="mg-area" style="position:relative;padding:8px;display:flex;justify-content:space-between;align-items:flex-start">
+          <div class="column" id="targets"></div>
+          <div style="width:18px"></div>
+          <div class="column" id="draggables"></div>
+        </div>
+      </div>
+
+      <div class="hint">Теперь можно тянуть провод слева направо и справа налево. Цвета остаются видимыми после соединения (провод рисуется и сохраняется).</div>
+    </div>
+
+    <div style="margin-top:14px;color:#8fbfe6;font-size:13px">Примечание: если мини-игру провалите, прогресс уменьшится, если выполните — загрузка продолжится.</div>
+  </div>
+
+  <div class="overlay" id="overlay"></div>
+
+  <script>
+    // Настройки
+    const TOTAL_SECONDS = 260; // ~4m20s
+    const TICK_MS = 200;
+    const INCREMENT_PER_TICK = 100 / (TOTAL_SECONDS * (1000 / TICK_MS));
+    const MALFUNCTION_MIN_INTERVAL = 10000;
+    const MALFUNCTION_MAX_INTERVAL = 30000;
+    const MINIGAME_TIMEOUT = 10; // seconds
+    const COLORS = ['red','orange','yellow','green','blue','purple'];
+
+    // Состояние
+    let progress = 0;
+    let running = true;
+    let tickTimer=null;
+    let nextMalfunctionTimer=null;
+    let inMinigame = false;
+
+    const barFill = document.getElementById('barFill');
+    const percentEl = document.getElementById('percent');
+    const statusText = document.getElementById('statusText');
+    const minigameEl = document.getElementById('minigame');
+    const targetsEl = document.getElementById('targets');
+    const draggablesEl = document.getElementById('draggables');
+    const mgTimerEl = document.getElementById('mgTimer');
+    const matchedCountEl = document.getElementById('matchedCount');
+    const overlay = document.getElementById('overlay');
+    const wiresSvg = document.getElementById('wires');
+    const svgWrap = document.getElementById('svgWrap');
+
+    document.getElementById('forceFail').addEventListener('click', ()=>triggerMalfunction());
+    document.getElementById('reset').addEventListener('click', resetAll);
+
+    function startProgress(){
+      if(tickTimer) clearInterval(tickTimer);
+      tickTimer = setInterval(()=>{
+        if(running && !inMinigame){
+          progress = Math.min(100, progress + INCREMENT_PER_TICK);
+          updateUI();
+          if(progress>=100){
+            finishHack();
+          }
+        }
+      }, TICK_MS);
+      scheduleNextMalfunction();
+    }
+
+    function updateUI(){
+      barFill.style.width = progress.toFixed(2) + '%';
+      percentEl.textContent = Math.floor(progress) + '%';
+      statusText.textContent = inMinigame ? 'Сбой — требуется вмешательство' : (progress<100? 'Взлом в процессе...' : 'Готово');
+    }
+
+    function scheduleNextMalfunction(){
+      if(nextMalfunctionTimer) clearTimeout(nextMalfunctionTimer);
+      const interval = randBetween(MALFUNCTION_MIN_INTERVAL, MALFUNCTION_MAX_INTERVAL);
+      nextMalfunctionTimer = setTimeout(()=>{ triggerMalfunction(); }, interval);
+    }
+
+    function triggerMalfunction(){
+      if(inMinigame || progress>=100) return;
+      inMinigame = true;
+      matchedCountEl.textContent = '0';
+      showMinigame();
+      updateUI();
+    }
+
+    function showMinigame(){
+      buildMinigame();
+      minigameEl.classList.add('active');
+      let remaining = MINIGAME_TIMEOUT;
+      mgTimerEl.textContent = remaining;
+      const mgInterval = setInterval(()=>{
+        remaining--;
+        mgTimerEl.textContent = remaining;
+        if(remaining<=0){
+          clearInterval(mgInterval);
+          finishMinigame(false);
+        }
+      },1000);
+    }
+
+    function buildMinigame(){
+      targetsEl.innerHTML='';
+      draggablesEl.innerHTML='';
+      wiresSvg.innerHTML='';
+
+      // create left targets (left->right)
+      COLORS.forEach(c=>{
+        const slot = document.createElement('div');
+        slot.className='slot';
+        slot.dataset.color=c;
+        slot.dataset.side='left';
+        slot.innerHTML = '<div style="width:100px;height:28px;border-radius:6px;background:'+c+';opacity:0.95"></div>';
+        // allow starting a drag from slot (left->right)
+        slot.addEventListener('pointerdown', onPointerDown);
+        slot.addEventListener('pointerup', onPointerUp);
+        targetsEl.appendChild(slot);
+      });
+
+      // create right draggables (right->left)
+      const rightOrder = [...COLORS];
+      rightOrder.reverse(); // to keep "противоположность" layout
+      rightOrder.forEach(c=>{
+        const d = document.createElement('div');
+        d.className='draggable';
+        d.dataset.color=c;
+        d.dataset.side='right';
+        d.innerHTML = '<div style="width:100px;height:28px;border-radius:6px;background:'+c+';opacity:0.95"></div>';
+        d.addEventListener('pointerdown', onPointerDown);
+        d.addEventListener('pointerup', onPointerUp);
+        draggablesEl.appendChild(d);
+      });
+
+      // allow also starting drag from right side to left (so both directions supported)
+      window.addEventListener('pointermove', onPointerMove);
+    }
+
+    // pointer-based dragging with wire drawing (supports dragging from either side)
+    let draggingEl = null;
+    let dragLine = null;
+
+    function getCenter(el){
+      const r = el.getBoundingClientRect();
+      const parentRect = svgWrap.getBoundingClientRect();
+      return {x: r.left + r.width/2 - parentRect.left, y: r.top + r.height/2 - parentRect.top};
+    }
+
+    function onPointerDown(e){
+      e.preventDefault();
+      draggingEl = e.currentTarget;
+      try{ draggingEl.setPointerCapture(e.pointerId); } catch(err){}
+      draggingEl.classList.add('dragging');
+      const start = getCenter(draggingEl);
+      dragLine = document.createElementNS('http://www.w3.org/2000/svg','path');
+      dragLine.setAttribute('stroke', draggingEl.dataset.color);
+      dragLine.setAttribute('stroke-width','6');
+      dragLine.setAttribute('stroke-linecap','round');
+      dragLine.setAttribute('fill','none');
+      dragLine.setAttribute('opacity','0.95');
+      wiresSvg.appendChild(dragLine);
+      updateDragLine(start.x, start.y, start.x, start.y);
+    }
+
+    function onPointerMove(e){
+      if(!draggingEl || !dragLine) return;
+      const parentRect = svgWrap.getBoundingClientRect();
+      const start = getCenter(draggingEl);
+      const x = e.clientX - parentRect.left;
+      const y = e.clientY - parentRect.top;
+      updateDragLine(start.x, start.y, x, y);
+    }
+
+    function updateDragLine(x1,y1,x2,y2){
+      const mx = (x1 + x2)/2;
+      const path = `M ${x1} ${y1} Q ${mx} ${(y1+y2)/2 - 40} ${x2} ${y2}`;
+      dragLine.setAttribute('d', path);
+    }
+
+    function onPointerUp(e){
+      if(!draggingEl) return;
+      const elAt = document.elementFromPoint(e.clientX, e.clientY);
+      const targetEl = elAt ? (elAt.closest('.slot') || elAt.closest('.draggable')) : null;
+      const color = draggingEl.dataset.color;
+      const startSide = draggingEl.dataset.side || 'left';
+
+      // determine valid match: if started on left (slot), target must be draggable (right) with same color; if started on right (draggable), target must be slot (left)
+      let valid=false;
+      if(targetEl && targetEl !== draggingEl){
+        const targetColor = targetEl.dataset.color;
+        const targetSide = targetEl.dataset.side || (targetEl.classList.contains('slot') ? 'left' : 'right');
+        if(color === targetColor && startSide !== targetSide){
+          valid = true;
+        }
+      }
+
+      if(valid){
+        // draw permanent wire between centers
+        const p1 = getCenter(draggingEl);
+        const p2 = getCenter(targetEl);
+        drawPermanentWire(p1,p2,color);
+        // keep both color blocks visible (do NOT remove elements)
+        markConnected(draggingEl, targetEl);
+        incrementMatched();
+      } else {
+        // remove temporary line with fade
+        if(dragLine) dragLine.animate([{opacity:1},{opacity:0}],{duration:300}).onfinish = ()=>{ if(dragLine) dragLine.remove(); };
+        if(targetEl) targetEl.animate([{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:300});
+      }
+
+      draggingEl.classList.remove('dragging');
+      try{ draggingEl.releasePointerCapture(e.pointerId); } catch(err){}
+      draggingEl = null; dragLine = null;
+    }
+
+    function drawPermanentWire(p1,p2,color){
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      path.setAttribute('stroke', color);
+      path.setAttribute('stroke-width','6');
+      path.setAttribute('stroke-linecap','round');
+      path.setAttribute('fill','none');
+      const mx = (p1.x + p2.x)/2;
+      const d = `M ${p1.x} ${p1.y} Q ${mx} ${(p1.y+p2.y)/2 - 40} ${p2.x} ${p2.y}`;
+      path.setAttribute('d', d);
+      wiresSvg.appendChild(path);
+    }
+
+    function markConnected(a,b){
+      // add subtle border/glow to indicate connection but keep elements visible
+      [a,b].forEach(el=>{
+        el.style.boxShadow = '0 0 0 3px rgba(255,255,255,0.03)';
+        el.dataset.connected = '1';
+      });
+    }
+
+    function incrementMatched(){
+      // count unique colors that have at least one permanent wire (by checking paths stroke colors)
+      const strokes = Array.from(wiresSvg.querySelectorAll('path')).map(p=>p.getAttribute('stroke'));
+      const unique = [...new Set(strokes)];
+      matchedCountEl.textContent = unique.length;
+      if(unique.length >= COLORS.length){
+        finishMinigame(true);
+      }
+    }
+
+    function finishMinigame(success){
+      inMinigame = false;
+      minigameEl.classList.remove('active');
+      window.removeEventListener('pointermove', onPointerMove);
+      if(success){
+        progress = Math.min(100, progress + 1.5);
+        updateUI();
+        scheduleNextMalfunction();
+      } else {
+        progress = Math.max(0, progress - 3);
+        updateUI();
+        scheduleNextMalfunction();
+      }
+    }
+
+    function finishHack(){
+      running = false;
+      updateUI();
+      showMessage('Взлом успешен', 'Взлом завершён. Сообщите Казаху кодовое слово - <strong>Корова</strong>.');
+    }
+
+    function showMessage(title, text){
+      const m = document.createElement('div');
+      m.className='msg';
+      m.innerHTML = `<h2>${title}</h2><div style="margin-bottom:8px">${text}</div><button id=closeMsg>ОК</button>`;
+      overlay.appendChild(m);
+      overlay.style.pointerEvents='auto';
+      document.getElementById('closeMsg').addEventListener('click', ()=>{
+        overlay.innerHTML='';
+        overlay.style.pointerEvents='none';
+      });
+    }
+
+    function resetAll(){
+      progress = 0; running = true; inMinigame = false;
+      updateUI();
+      scheduleNextMalfunction();
+    }
+
+    function randBetween(a,b){return Math.floor(Math.random()*(b-a)+a)}
+
+    // старт
+    startProgress();
+  </script>
+</body>
+</html>
